@@ -107,7 +107,7 @@ def calcular_erro(f, N, a, b):
 
 # Definição dos limites do intervalo de integração e o número de pontos de quadratura
 a, b = 1, 3  # Intervalo de integração
-N = 3  # Número de pontos de integração
+N = 4  # Número de pontos de integração
 
 # Calcula os pontos de integração e os pesos
 pontos, pesos = metodo_newton(N, a, b)
