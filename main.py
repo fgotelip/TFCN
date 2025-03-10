@@ -111,6 +111,7 @@ N = 4  # Número de pontos de integração
 
 # Calcula os pontos de integração e os pesos
 pontos, pesos = metodo_newton(N, a, b)
+
 print("Pontos de integração:", pontos)
 print("Pesos:", pesos)
 
