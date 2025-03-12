@@ -117,3 +117,14 @@ imprimir_pesos_pontos(i2,w2, t2)
 print("x*e^x")
 imprimir_pesos_pontos(i3,w3, t3)
 
+''''
+Os pesos w0 são inicializados uniformemente como w0 = (b - a) / (2 * (N + 1)),
+garantindo que os valores sejam pequenos o suficiente para evitar grandes erros na iteração do método de Newton.
+Já os pontos t0 são obtidos a partir dos zeros do polinômio de Legendre no intervalo padrão [-1,1]
+usando np.polynomial.legendre.leggauss(N)[0], e são escalados para o intervalo desejado [a, b]
+por meio da transformação t0 = ((b - a) / 2) * t + ((a + b) / 2),
+garantindo que os cálculos sejam ajustados corretamente para qualquer
+intervalo de integração. Essas escolhas permitem um ponto de partida
+adequado para que o método de Newton encontre os pesos e pontos corretos da quadratura de Gauss-Legendre
+de forma eficiente.'
+'''
