@@ -1,125 +1,119 @@
 import numpy as np
-import scipy.linalg as la
-import scipy.integrate as integrate
+from scipy.integrate import quad
+from scipy.linalg import solve
 
-def calcular_g(N, a, b, m=1000):
-    """
-    Calcula os valores g_j numericamente usando o método de Newton-Cotes repetido.
-    """
-    # Cria um vetor de pontos igualmente espaçados no intervalo [a, b]
-    x = np.linspace(a, b, m+1)
-    
-    # Calcula o passo h
-    h = (b - a) / m
-    
-    # Calcula os valores de g_j usando a regra do trapézio para cada j
-    g = np.array([np.trapezoid(x**(j-1), x) for j in range(1, 2*N+1)])
-    return g
-
-def f(w, t, g, N):
-    """
-    Função que calcula a diferença entre a soma dos termos de quadratura e os valores g_j.
-    """
-    return np.array([np.sum(w * t**(j-1)) - g[j-1] for j in range(1, 2*N+1)])
-
-def jacobiana(w, t, g, N, epsilon=1e-8):
-    """
-    Calcula a matriz Jacobiana numericamente.
-    A Jacobiana é necessária para o método de Newton, que ajusta os valores de w e t.
-    """
-    J = np.zeros((2*N, 2*N))  # Inicializa a matriz Jacobiana
-    f0 = f(w, t, g, N)  # Calcula os valores iniciais da função f(w, t)
-    
-    # Calcula a Jacobiana por diferenças finitas
-    for i in range(N):
-        # Perturba w[i] por uma pequena quantidade epsilon e calcula a diferença
-        w_eps = w.copy()
-        w_eps[i] += epsilon
-        J[:, i] = (f(w_eps, t, g, N) - f0) / epsilon
-        
-        # Perturba t[i] por uma pequena quantidade epsilon e calcula a diferença
-        t_eps = t.copy()
-        t_eps[i] += epsilon
-        J[:, N + i] = (f(w, t_eps, g, N) - f0) / epsilon
-    
-    return J
-
-def metodo_newton(N, a, b, tol=1e-8, max_iter=100):
-    """
-    Resolve o sistema não linear pelo método de Newton para obter os pontos e pesos da quadratura de Gauss.
-    """
-    # Condições iniciais sugeridas para w e t (pesos e pontos)
-    w = np.array([(b - a) / (2 * N) if i <= N/2 else (b - a) / (2 * N) for i in range(N)])
-    
-    # Calcula os pontos t (onde a função será avaliada)
-    t = np.array([a + i * w[i] / 2 if i < N/2 else (a + b) - (a + (i - N//2) * w[i] / 2) for i in range(N)])
-    
-    # Caso N seja ímpar, ajusta o ponto do meio
-    if N % 2 == 1:
-        t[N//2] = (a + b) / 2
-    
-    # Calcula os valores g_j
-    g = calcular_g(N, a, b)
-    
-    # Itera até que a convergência seja alcançada ou o número máximo de iterações seja atingido
+# Método de Newton para resolver sistemas não-lineares
+def metodo_newton(f, J, w0, t0, tol=1e-8, max_iter=100):
+    w, t = np.array(w0), np.array(t0)  # Condições iniciais para pesos e pontos
     for _ in range(max_iter):
-        f_val = f(w, t, g, N)  # Calcula o valor da função f(w, t)
-        
-        # Verifica se a solução atingiu a tolerância desejada
-        if np.linalg.norm(f_val, np.inf) < tol:
+        F = f(w, t)  # Avalia as equações não-lineares
+        if np.linalg.norm(F, ord=np.inf) < tol:  # Verifica se a solução convergiu
             break
-        
-        # Calcula a Jacobiana e resolve o sistema linear
-        J = jacobiana(w, t, g, N)
-        s = la.solve(J, -f_val)
-        
-        # Atualiza os valores de w e t
-        w += s[:N]
-        t += s[N:]
+        J_matrix = J(w, t)  # Calcula a matriz Jacobiana
+        try:
+            delta = solve(J_matrix, -F)  # Resolve o sistema linear para encontrar o incremento
+        except np.linalg.LinAlgError:
+            break  # Se a matriz Jacobiana for singular, interrompe o processo
+        w[:], t[:] = w + delta[:len(w)], t + delta[len(w):]  # Atualiza os valores de w e t
+    return w, t
+
+# Função para calcular os pesos e pontos de integração da quadratura de Gauss-Legendre
+def gauss_legendre(N, a=-1, b=1):
+    # Função para calcular os momentos (integrais de x^(j-1) no intervalo [a, b])
+    def momentos(j):
+        return quad(lambda x: x**(j-1), a, b)[0]
     
-    return t, w
-
-def integrar_gauss(f, N, a, b):
-    """
-    Usa a quadratura de Gauss para integrar numericamente a função f no intervalo [a, b].
-    """
-    # Obtém os pontos e pesos de Gauss
-    t, w = metodo_newton(N, a, b)
+    # Vetor g contendo os momentos para j = 1, 2, ..., 2N
+    g = np.array([momentos(j) for j in range(1, 2*N+1)])
     
-    # Calcula a integral usando a fórmula de quadratura de Gauss
-    return np.sum(w * f(t))
-
-def calcular_erro(f, N, a, b):
-    """
-    Calcula a integral exata, a integral aproximada usando Gauss e o erro absoluto.
-    """
-    # Calcula a integral exata usando o método de integração numérica de SciPy
-    integral_exata, _ = integrate.quad(f, a, b)
+    # Condições iniciais para os pesos e pontos
+    w0 = np.full(N, (b - a) / (2 * (N + 1)))  # Inicialização dos pesos
+    t0 = np.polynomial.legendre.leggauss(N)[0] * (b - a) / 2 + (a + b) / 2  # Chute inicial para os pontos
     
-    # Calcula a integral aproximada usando a quadratura de Gauss
-    integral_aproximada = integrar_gauss(f, N, a, b)
+    # Função que define as equações não-lineares
+    def equacoes(w, t):
+        return np.array([sum(w[i] * t[i]**(j-1) for i in range(N)) - g[j-1] for j in range(1, 2*N+1)])
     
-    # Calcula o erro absoluto
-    erro = abs(integral_exata - integral_aproximada)
+    # Função para calcular a matriz Jacobiana
+    def jacobiano(w, t):
+        epsilon = 1e-8  # Perturbação para calcular derivadas numéricas
+        J = np.zeros((2*N, 2*N))  # Inicializa a matriz Jacobiana
+        for j in range(2*N):
+            for i in range(N):
+                w_perturb = w.copy()
+                t_perturb = t.copy()
+                w_perturb[i] += epsilon  # Perturba o peso w[i]
+                t_perturb[i] += epsilon  # Perturba o ponto t[i]
+                # Calcula as derivadas parciais numericamente
+                J[j, i] = (equacoes(w_perturb, t)[j] - equacoes(w, t)[j]) / epsilon
+                J[j, N + i] = (equacoes(w, t_perturb)[j] - equacoes(w, t)[j]) / epsilon
+        return J
     
-    return integral_exata, integral_aproximada, erro
+    # Resolve o sistema não-linear usando o método de Newton
+    w, t = metodo_newton(equacoes, jacobiano, w0, t0)
+    return w, t
 
+# Função para calcular a integral aproximada usando os pesos e pontos de integração
+def integral_aproximada(f, w, t, a, b):
+    return sum(w[i] * f(t[i]) for i in range(len(w)))
 
-# Definição dos limites do intervalo de integração e o número de pontos de quadratura
-a, b = 1, 3  # Intervalo de integração
-N = 4  # Número de pontos de integração
+# Função para calcular a integral exata usando a função quad do scipy
+def integral_exata(f, a, b):
+    return quad(f, a, b)[0]
 
-# Calcula os pontos de integração e os pesos
-pontos, pesos = metodo_newton(N, a, b)
+# Função para calcular o erro absoluto entre a integral aproximada e a exata
+def calcular_erro(aproximada, exata):
+    return abs(aproximada - exata)
 
-print("Pontos de integração:", pontos)
-print("Pesos:", pesos)
+def resultados(intervalos,f):
+    lista_w = []
+    lista_t = []
+    intervalos_lista = []
+    for a, b in intervalos:
+        for N in range(1, 8):
+            w, t = gauss_legendre(N, a, b)  # Calcula os pesos e pontos de integração
+            lista_w.append(w)
+            lista_t.append(t)
+            aproximada = integral_aproximada(f, w, t, a, b)  # Calcula a integral aproximada
+            exata = integral_exata(f, a, b)  # Calcula a integral exata
+            erro = calcular_erro(aproximada, exata)  # Calcula o erro
+            # Exibe os resultados
+            intervalo = f"[{a}, {b}]"
+            intervalos_lista.append(intervalo)
+            print(intervalo,N,aproximada,exata,erro)
+        print()
+    return intervalos_lista,lista_w, lista_t
 
-# Testando a integração numérica
-funcao = lambda x: 3*np.exp(x)  # Exemplo de função
+def imprimir_pesos_pontos(lista_i,lista_w, lista_t):
+    n=1
+    for i,w,t in zip(lista_i,lista_w, lista_t):
+        print(i,n,w,t)
+        n+=1
+        if n==8:
+            print()
+            n=1
+    print("\n")
 
-# Calculando erro
-integral_exata, integral_aproximada, erro = calcular_erro(funcao, N, a, b)
-print(f"Integral exata: {integral_exata}")
-print(f"Integral aproximada: {integral_aproximada}")
-print(f"Erro absoluto: {erro}")
+f1 = lambda x: np.exp(x)
+f2 = lambda x: x**2 - 3
+f3 = lambda x: x*np.exp(x)
+
+# Intervalos de integração
+intervalos = [(-1, 1), (0, 2), (-2, 2)]
+
+print("Intervalo, N, Integral aproximada, Integral exata, Erro")
+print("e^x")
+i1,w1,t1 = resultados(intervalos,f1)
+print("x^2 - 3")
+i2,w2,t2 = resultados(intervalos,f2)
+print("x*e^x")   
+i3,w3,t3 = resultados(intervalos,f3)
+
+print("Intervalo, N, Pesos, Pontos")
+print("e^x")
+imprimir_pesos_pontos(i1,w1, t1)
+print("x^2 - 3")
+imprimir_pesos_pontos(i2,w2, t2)
+print("x*e^x")
+imprimir_pesos_pontos(i3,w3, t3)
+
